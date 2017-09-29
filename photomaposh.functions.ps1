@@ -73,30 +73,31 @@ function Get-ValidName($badName)
     return "$dateBadName " + (Get-Culture).textinfo.totitlecase($badName.split(" ", 2)[1].tolower())
 }
 
-function Get-FileMetaData($filePath)
+function Get-FileMetaData([System.IO.FileSystemInfo]$file)
 {
-    $folder = $filePath
-    foreach($sFolder in $folder)
-     {
-      $a = 0
-      $objShell = New-Object -ComObject Shell.Application
-      $objFolder = $objShell.namespace($sFolder)
-   
-      foreach ($File in $objFolder.items())
-       { 
-        $FileMetaData = New-Object PSOBJECT
-         for ($a ; $a  -le 266; $a++)
-          { 
-            if($objFolder.getDetailsOf($File, $a))
-              {
-                $hash += @{$($objFolder.getDetailsOf($objFolder.items, $a))  =
-                      $($objFolder.getDetailsOf($File, $a)) }
-               $FileMetaData | Add-Member $hash
-               $hash.clear() 
-              } #end if
-          } #end for 
-        $a=0
-        $FileMetaData
-       } #end foreach $file
-     } #end foreach $sfolder
+    $hResult = @{}
+    $shell = New-Object -ComObject Shell.Application
+    $folder = $shell.namespace($file.DirectoryName)
+    $item = $folder.Items().Item($file.Name)
+    for ($a = 0; $a -le 266; $a++) {
+        if (!($hResult.ContainsKey($objFolder.getDetailsOf($objFolder.items, $a))))
+        {
+            $hResult.Add($objFolder.getDetailsOf($objFolder.items, $a), $folder.getdetailsof($item, $a))
+        }
+    }
+    return $hResult
+}
+
+function Get-FileMetaDateTaken([System.IO.FileSystemInfo]$file)
+{
+    $shell = New-Object -ComObject Shell.Application
+    $folder = $shell.namespace($file.DirectoryName)
+    $item = $folder.Items().Item($file.Name)
+    return ($folder.getdetailsof($item, 12) -Replace [char]8206) -Replace [char]8207
+}
+
+function Get-ValidNameFromFolder($badName)
+{
+    $dateName = $badName.Split(" ")[0].Replace("-", "")
+    return $dateName + "_" + (Get-Culture).textinfo.totitlecase($badName.Split(" ", 2)[1]).Replace(" ", "").Replace(",", "").Replace("-", "")
 }

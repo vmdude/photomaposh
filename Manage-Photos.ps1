@@ -1,5 +1,6 @@
 #Requires -Version 4
 
+# .\Manage-Photos.ps1 -startFolder Y:\Download\TODOPHOTOS
 Param (
     [Parameter(Mandatory=$true)]
     [string]$startFolder,
@@ -27,9 +28,9 @@ if ( !(test-path $startFolder) )
 
 $start = Get-Date
 $myRootPath = "Y:\Download\A_TRIER_PHOTOS\"
-$myDeletePath = $myRootPath + "todelete\"
-$myRawMovePath = $myRootPath + "tomovePhotosRAW\"
-$myJpgMovePath = $myRootPath + "tomovePhotos\"
+$myDeletePath = $myRootPath + "todelete"
+$myRawMovePath = $myRootPath + "tomovePhotosRAW"
+$myJpgMovePath = $myRootPath + "tomovePhotos"
 
 New-FolderIfNotExist($myDeletePath)
 New-FolderIfNotExist($myRawMovePath)
@@ -40,6 +41,13 @@ Write-Host -ForegroundColor Magenta "> Selected root folder is $startFolder"
 
 # First step is directory naming check
 $step1start = Get-Date
+$Activity = "Managing Photos Awesomeness"
+$Id       = 1
+$TotalSteps = 5
+$Step       = 1
+$StepText   = "Directory Naming Check"
+Write-Progress -Id $Id -Activity $Activity -Status "Step $Step of $TotalSteps | $StepText" -PercentComplete ($Step / $TotalSteps * 100)
+
 $needFixDirectories = New-Object System.Collections.ArrayList
 $cleanDirectories = New-Object System.Collections.ArrayList
 
@@ -66,7 +74,7 @@ if ($needFixDirectories.Count -gt 0)
         $newName = Get-ValidName $needFixDirectory.Name
         if ($newName -cne $needFixDirectory.Name)
         {
-            Rename-Item -Path $needFixDirectory.FullName -NewName $newName -WhatIf
+            Rename-Item -Path $needFixDirectory.FullName -NewName "tmp_$newName" -PassThru | Rename-Item -NewName $newName
         }
         else
         {
@@ -82,6 +90,10 @@ Write-Host -ForegroundColor Cyan ">> Step 1 completed successfully in"  (Get-Hum
 
 # Second step is finding orphan files and removing them
 $step2start = Get-Date
+$Step       = 2
+$StepText   = "Finding orphan files and removing them"
+Write-Progress -Id $Id -Activity $Activity -Status "Step $Step of $TotalSteps | $StepText" -PercentComplete ($Step / $TotalSteps * 100)
+
 $jpgFiles = New-Object System.Collections.ArrayList
 $rawFiles = New-Object System.Collections.ArrayList
 $orphansRawFiles = New-Object System.Collections.ArrayList
@@ -100,16 +112,20 @@ foreach ($photoFile in Get-ChildItem -Path $startFolder -Recurse -Include *.jpg,
     }
 }
 
+$counter = 1
 foreach ($rawFile in $rawFiles)
 {
+    Write-Progress -Id ($Id+1) -Activity " " -Status ("RAW File $counter of $($rawFiles.Count) | $($rawFile.Name)") -PercentComplete ($counter / ($rawFiles.Count) * 100) -ParentId $Id
+    
     if (!(Test-Path ($rawFile.FullName -ireplace(".cr2",".jpg"))))
     {
         $orphanRawFileDirectory = $rawFile.DirectoryName.replace($startFolder, $myDeletePath)
         New-FolderIfNotExist($orphanRawFileDirectory)
         $orphansRawFiles.Add($rawFile) | Out-Null
-        Move-Item -Path $rawFile.FullName -Destination $orphanRawFileDirectory -WhatIf
+        Move-Item -Path $rawFile.FullName -Destination $orphanRawFileDirectory
         Write-Host -ForegroundColor Green "   Orphan file moved:" $rawFile.Name
     }
+    $counter++
 }
 
 foreach ($orphanRawFile in $orphansRawFiles)
@@ -127,12 +143,111 @@ if ($jpgFiles.Count -ne $rawFiles.Count)
 }
 
 
+# Third step is renaming photo based on EXIF tags
+$step3start = Get-Date
+$Step       = 3
+$StepText   = "Renaming photo based on EXIF tags"
+Write-Progress -Id $Id -Activity $Activity -Status "Step $Step of $TotalSteps | $StepText" -PercentComplete ($Step / $TotalSteps * 100)
+Write-Host -ForegroundColor Cyan ">> Step 3: Renaming files based on EXIF infos"
 
-# Thirs step is renaming photo based on EXIF tags
-# rename_photo_exif()
+$counter = 1
+foreach ($groupFiles in $jpgFiles | Group-Object Directory)
+{
+    $hFile = @()
+    foreach ($photoGroupFile in $groupFiles.Group)
+    {
+        $hFile += @( @{"CreatedDate" = [Math]::Floor([decimal](Get-Date(Get-Date(Get-FileMetaDateTaken $photoGroupFile)).ToUniversalTime()-uformat "%s")); "PhotoFile" = $photoGroupFile} )
+    }
+    $filePos = 1
+    foreach ($fileToRename in $hFile | Sort-Object {$_.CreatedDate} | %{$_.PhotoFile})
+    {
+        Write-Progress -Id ($Id+1) -Activity " " -Status ("Photo File $counter of $($jpgFiles.Count) | $($fileToRename.Name)") -PercentComplete ($counter / ($jpgFiles.Count) * 100) -ParentId $Id
+        
+        $newName = (Get-ValidNameFromFolder ($fileToRename.DirectoryName | Split-Path -Leaf)) + "_" + $filePos.ToString("000") + "-" + $fileToRename.Name
+        $newNameRAW = ((Get-ValidNameFromFolder (($fileToRename.DirectoryName | Split-Path -Leaf).Split(" ", 2)[0] + "-RAW " + ($fileToRename.DirectoryName | Split-Path -Leaf).Split(" ", 2)[1])).Replace("RAW", "-RAW")) + "_" + $filePos.ToString("000") + "-" + $fileToRename.Name
+        Rename-Item -Path $fileToRename.FullName -NewName $newName
+        Write-Host -ForegroundColor Green "   Renamed file" $fileToRename.Name "to" $newName
+        Rename-Item -Path ($fileToRename.FullName -ireplace(".jpg",".cr2")) -NewName $newNameRAW
+        Write-Host -ForegroundColor Green "   Renamed RAW file" ($fileToRename.Name -ireplace(".jpg",".cr2")) "to" $newNameRAW
+        $filePos++
+        $counter++
+    }
+}
+
+$step3finish = Get-Date
+Write-Host -ForegroundColor Cyan ">> Step 3 completed successfully in"  (Get-HumanReadableDatetime $step3start $step3finish)
+
 
 # Fourth step is separating JPG files from RAW files
-# separating_raw_files()
+$step4start = Get-Date
+$Step       = 4
+$StepText   = "Separating JPG files from RAW files"
+Write-Progress -Id $Id -Activity $Activity -Status "Step $Step of $TotalSteps | $StepText" -PercentComplete ($Step / $TotalSteps * 100)
+
+$jpgFiles = New-Object System.Collections.ArrayList
+$rawFiles = New-Object System.Collections.ArrayList
+
+Write-Host -ForegroundColor Cyan ">> Step 4: Separating photos JPG<>RAW"
+
+foreach ($photoFile in Get-ChildItem -Path $startFolder -Recurse -Include *.jpg, *.cr2 -Exclude '.DS_Store')
+{
+    if ($photoFile.Extension -match ".jpg")
+    {
+        $jpgFiles.Add($photoFile) | Out-Null
+    }
+    else
+    {
+        $rawFiles.Add($photoFile) | Out-Null
+    }
+}
+
+$counter = 1
+foreach ($jpgFile in $jpgFiles)
+{
+    Write-Progress -Id ($Id+1) -Activity " " -Status ("Photo File $counter of $($jpgFiles.Count + $rawFiles.Count) | $($jpgFile.Name)") -PercentComplete ($counter / ($jpgFiles.Count + $rawFiles.Count) * 100) -ParentId $Id
+    
+    $newJpgFileDirectory = $jpgFile.DirectoryName.replace($startFolder, $myJpgMovePath)
+    New-FolderIfNotExist($newJpgFileDirectory)
+    Move-Item -Path $jpgFile.FullName -Destination $newJpgFileDirectory
+    Write-Host -ForegroundColor Green "   Photo file moved:" $jpgFile.Name "to" $newJpgFileDirectory
+    $counter++
+}
+
+foreach ($rawFile in $rawFiles)
+{
+    Write-Progress -Id ($Id+1) -Activity " " -Status ("Photo File $counter of $($jpgFiles.Count + $rawFiles.Count) | $($rawFile.Name)") -PercentComplete ($counter / ($jpgFiles.Count + $rawFiles.Count) * 100) -ParentId $Id
+    
+    $newRawFileDirectory = Join-Path $myRawMovePath (($rawFile.DirectoryName | Split-Path -Leaf).Split(" ", 2)[0] + "-RAW " + ($rawFile.DirectoryName | Split-Path -Leaf).Split(" ", 2)[1])
+    New-FolderIfNotExist($newRawFileDirectory)
+    Move-Item -Path $rawFile.FullName -Destination $newRawFileDirectory
+    Write-Host -ForegroundColor Green "   RAW Photo file moved:" $rawFile.Name "to" $newRawFileDirectory
+    $counter++
+}
+
+$step4finish = Get-Date
+Write-Host -ForegroundColor Cyan ">> Step 4 completed successfully in"  (Get-HumanReadableDatetime $step4start $step4finish)
+
+
+
+# Last step is cleaning
+$step5start = Get-Date
+$Step       = 5
+$StepText   = "Cleaning"
+Write-Progress -Id $Id -Activity $Activity -Status "Step $Step of $TotalSteps | $StepText" -PercentComplete ($Step / $TotalSteps * 100)
+
+if ((Get-ChildItem -File -Recurse $startFolder -Exclude '.DS_Store').Count -eq 0)
+{
+    Remove-Item $startFolder -Force -Confirm:$false -Recurse
+}
+else
+{
+    Write-Host -ForegroundColor Red -BackgroundColor Black "There are still some files under $startFolder, please check..."   
+}
+
+$step5finish = Get-Date
+Write-Host -ForegroundColor Cyan ">> Step 5 completed successfully in"  (Get-HumanReadableDatetime $step5start $step5finish)
+
+
 $finish = Get-Date
 Write-Host -ForegroundColor Magenta "> Completed in" (Get-HumanReadableDatetime $start $finish)
 
